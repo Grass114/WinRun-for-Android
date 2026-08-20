@@ -1,31 +1,40 @@
 package com.bluecat114.run;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.Color;
-import android.content.res.Resources;
-import android.util.TypedValue;
+import android.media.MediaPlayer;
+
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Arrays;
 
 public class MainActivity extends Activity {
     private EditText et;
@@ -34,6 +43,16 @@ public class MainActivity extends Activity {
     private ScrollView scrollView;
     private static final int FILE_SELECT_CODE = 100;
     private static final int PERMISSION_REQUEST_CODE = 101;
+
+    private MediaPlayer mediaPlayer;
+    private AlertDialog audioDialog;
+    private SeekBar seekBar;
+    private TextView tvCurrentTime, tvTotalTime, tvAudioTitle;
+    private Button btnPlayPause, btnClose;
+    private Handler handler = new Handler();
+    private boolean isPlaying = false;
+    private boolean isPrepared = false;
+    private boolean isUserSeeking = false;
 
     private int dp2px(float dp) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp,
@@ -45,7 +64,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        // ========== 检查并请求存储权限（原生 API，无 AndroidX） ==========
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
                     != PackageManager.PERMISSION_GRANTED) {
@@ -54,7 +72,6 @@ public class MainActivity extends Activity {
             }
         }
 
-        // ========== 应用名映射 ==========
         appMap = new HashMap<>();
         appMap.put("微信", "com.tencent.mm");
         appMap.put("qq", "com.tencent.mobileqq");
@@ -65,13 +82,11 @@ public class MainActivity extends Activity {
         appMap.put("相机", "com.android.camera");
         appMap.put("浏览器", "com.android.browser");
 
-        // ========== 根容器 ==========
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         root.setPadding(dp2px(16), dp2px(16), dp2px(16), dp2px(16));
 
-        // ========== 标题行 ==========
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -94,7 +109,6 @@ public class MainActivity extends Activity {
         titleRow.addView(icon);
         titleRow.addView(title);
 
-        // ========== 说明文字 ==========
         TextView desc = new TextView(this);
         desc.setText("Android 将根据你所输入的名称，为你打开相应的程序、文件夹、文档或 Internet 资源。");
         desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -102,7 +116,6 @@ public class MainActivity extends Activity {
         desc.setGravity(Gravity.START);
         desc.setPadding(0, dp2px(4), 0, dp2px(8));
 
-        // ========== 快速访问提示 ==========
         LinearLayout tipLayout = new LinearLayout(this);
         tipLayout.setOrientation(LinearLayout.VERTICAL);
         tipLayout.setPadding(0, dp2px(4), 0, dp2px(12));
@@ -128,7 +141,6 @@ public class MainActivity extends Activity {
         tipLayout.addView(tipText);
         tipLayout.addView(pathView);
 
-        // ========== 文件列表区域 ==========
         scrollView = new ScrollView(this);
         scrollView.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -141,12 +153,10 @@ public class MainActivity extends Activity {
         fileListContainer.setGravity(Gravity.START);
         scrollView.addView(fileListContainer);
 
-        // ========== 底部行：输入框 + 浏览按钮 + 运行按钮 ==========
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        // 输入框
         et = new EditText(this);
         et.setHint("输入路径 / 应用名 / 包名 / 网址…");
         et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -160,7 +170,6 @@ public class MainActivity extends Activity {
         et.setBackground(etBg);
         et.setPadding(dp2px(20), dp2px(16), dp2px(20), dp2px(16));
 
-        // 浏览按钮
         Button btnBrowse = new Button(this);
         btnBrowse.setText("浏览...");
         btnBrowse.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
@@ -173,7 +182,6 @@ public class MainActivity extends Activity {
         btnBrowse.setPadding(dp2px(16), dp2px(16), dp2px(16), dp2px(16));
         btnBrowse.setOnClickListener(v -> openFilePicker());
 
-        // 运行按钮
         Button btnRun = new Button(this);
         btnRun.setText("运 行");
         btnRun.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -185,7 +193,6 @@ public class MainActivity extends Activity {
         btnRun.setBackground(btnBg);
         btnRun.setPadding(dp2px(16), dp2px(16), dp2px(16), dp2px(16));
 
-        // 布局参数
         LinearLayout.LayoutParams etParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 2.0f
         );
@@ -209,7 +216,6 @@ public class MainActivity extends Activity {
         bottomRow.addView(btnBrowse);
         bottomRow.addView(btnRun);
 
-        // ========== 组装视图 ==========
         root.addView(titleRow);
         root.addView(desc);
         root.addView(tipLayout);
@@ -217,7 +223,6 @@ public class MainActivity extends Activity {
         root.addView(bottomRow);
         setContentView(root);
 
-        // ========== 事件绑定 ==========
         btnRun.setOnClickListener(v -> handleInput(et.getText().toString().trim()));
 
         et.setOnKeyListener((v, key, event) -> {
@@ -247,20 +252,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    // ========== 权限回调（原生 API） ==========
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "存储权限已授予", Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, "需要存储权限才能浏览文件", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-
-    // ========== 打开文件选择器 ==========
     private void openFilePicker() {
         try {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -273,7 +264,7 @@ public class MainActivity extends Activity {
                 intent.setType("*/*");
                 startActivityForResult(intent, FILE_SELECT_CODE);
             } catch (Exception e2) {
-                Toast.makeText(this, "无法打开文件选择器，请检查权限", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -291,7 +282,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ========== 显示文件列表 ==========
     private void showFileList(String path) {
         fileListContainer.removeAllViews();
 
@@ -313,7 +303,6 @@ public class MainActivity extends Activity {
             TextView error = new TextView(this);
             error.setText("不是目录: " + cleanPath);
             error.setTextColor(Color.RED);
-            error.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             error.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
             fileListContainer.addView(error);
             return;
@@ -321,23 +310,35 @@ public class MainActivity extends Activity {
 
         File parent = dir.getParentFile();
         if (parent != null && parent.exists() && parent.isDirectory()) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
+            GradientDrawable border = new GradientDrawable();
+            border.setShape(GradientDrawable.RECTANGLE);
+            border.setCornerRadius(dp2px(8));
+            border.setStroke(dp2px(1), Color.parseColor("#DDDDDD"));
+            border.setColor(Color.WHITE);
+            row.setBackground(border);
+            row.setElevation(dp2px(2));
+
             TextView upItem = new TextView(this);
             upItem.setText("📁 ..");
             upItem.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             upItem.setTextColor(Color.parseColor("#2196F3"));
-            upItem.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
-            upItem.setOnClickListener(v -> {
+            upItem.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+            row.addView(upItem);
+            row.setOnClickListener(v -> {
                 String parentPath = parent.getAbsolutePath();
                 et.setText(parentPath);
                 showFileList(parentPath);
             });
-            fileListContainer.addView(upItem);
-            View divider = new View(this);
-            divider.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)
-            ));
-            divider.setBackgroundColor(Color.parseColor("#E0E0E0"));
-            fileListContainer.addView(divider);
+            fileListContainer.addView(row);
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp2px(6)));
+            fileListContainer.addView(spacer);
         }
 
         File[] files = dir.listFiles();
@@ -345,7 +346,6 @@ public class MainActivity extends Activity {
             TextView error = new TextView(this);
             error.setText("无法读取目录（可能权限不足）");
             error.setTextColor(Color.RED);
-            error.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             error.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
             fileListContainer.addView(error);
             return;
@@ -354,7 +354,6 @@ public class MainActivity extends Activity {
             TextView empty = new TextView(this);
             empty.setText("(空文件夹)");
             empty.setTextColor(Color.GRAY);
-            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             empty.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
             fileListContainer.addView(empty);
             return;
@@ -367,33 +366,89 @@ public class MainActivity extends Activity {
         });
 
         for (File f : files) {
-            TextView item = new TextView(this);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
+
+            GradientDrawable border = new GradientDrawable();
+            border.setShape(GradientDrawable.RECTANGLE);
+            border.setCornerRadius(dp2px(8));
+            border.setStroke(dp2px(1), Color.parseColor("#DDDDDD"));
+            border.setColor(Color.WHITE);
+            row.setBackground(border);
+            row.setElevation(dp2px(2));
+
             String name = f.getName();
+            String ext = getFileExtension(name);
+
+            TextView item = new TextView(this);
+            String iconPrefix = "📄 ";
             if (f.isDirectory()) {
-                name = "📁 " + name;
-            } else {
-                name = "📄 " + name;
+                iconPrefix = "📁 ";
+            } else if (isImageFile(ext)) {
+                iconPrefix = "🖼️ ";
+            } else if (isAudioFile(ext)) {
+                iconPrefix = "🎵 ";
+            } else if (isTextFile(ext)) {
+                iconPrefix = "📝 ";
+            } else if (ext.equals("apk")) {
+                iconPrefix = "📦 ";
+            } else if (ext.equals("pdf")) {
+                iconPrefix = "📕 ";
+            } else if (ext.equals("zip") || ext.equals("rar") || ext.equals("7z")) {
+                iconPrefix = "📦 ";
             }
-            item.setText(name);
+            item.setText(iconPrefix + name);
             item.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             item.setTextColor(Color.BLACK);
-            item.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
-            item.setOnClickListener(v -> {
-                if (f.isDirectory()) {
-                    String newPath = f.getAbsolutePath();
-                    et.setText(newPath);
-                    showFileList(newPath);
-                } else {
-                    openFile(f.getAbsolutePath());
-                }
-            });
-            View divider = new View(this);
-            divider.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)
-            ));
-            divider.setBackgroundColor(Color.parseColor("#E0E0E0"));
-            fileListContainer.addView(item);
-            fileListContainer.addView(divider);
+            item.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+            boolean canPreview = isImageFile(ext) || isAudioFile(ext) || isDocumentFile(ext);
+
+            if (f.isDirectory() || !canPreview) {
+                row.setOnClickListener(v -> {
+                    if (f.isDirectory()) {
+                        String newPath = f.getAbsolutePath();
+                        et.setText(newPath);
+                        showFileList(newPath);
+                    } else {
+                        openFile(f);
+                    }
+                });
+            } else {
+                row.setOnClickListener(v -> openFile(f));
+            }
+
+            if (canPreview && !f.isDirectory()) {
+                Button previewBtn = new Button(this);
+                previewBtn.setText("📷 预览");
+                previewBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                previewBtn.setTextColor(Color.WHITE);
+                GradientDrawable btnBg = new GradientDrawable();
+                btnBg.setShape(GradientDrawable.RECTANGLE);
+                btnBg.setCornerRadius(dp2px(16));
+                btnBg.setColor(Color.parseColor("#FF9800"));
+                previewBtn.setBackground(btnBg);
+                previewBtn.setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
+                previewBtn.setOnClickListener(v -> previewFile(f));
+                LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                );
+                btnParams.setMargins(dp2px(8), 0, 0, 0);
+                previewBtn.setLayoutParams(btnParams);
+                row.addView(item);
+                row.addView(previewBtn);
+            } else {
+                row.addView(item);
+            }
+
+            fileListContainer.addView(row);
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp2px(6)));
+            fileListContainer.addView(spacer);
         }
     }
 
@@ -401,7 +456,395 @@ public class MainActivity extends Activity {
         fileListContainer.removeAllViews();
     }
 
-    // ========== 处理输入 ==========
+    private void previewFile(File file) {
+        String ext = getFileExtension(file.getName()).toLowerCase();
+
+        if (isImageFile(ext)) {
+            previewImage(file);
+        } else if (isAudioFile(ext)) {
+            playAudio(file);
+        } else if (isDocumentFile(ext)) {
+            previewDocument(file);
+        } else {
+            Toast.makeText(this, "该文件类型暂不支持预览", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void previewImage(File file) {
+        try {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog);
+
+            LinearLayout rootLayout = new LinearLayout(this);
+            rootLayout.setOrientation(LinearLayout.VERTICAL);
+            rootLayout.setPadding(dp2px(16), dp2px(16), dp2px(16), dp2px(16));
+            rootLayout.setBackgroundColor(Color.WHITE);
+
+            TextView fileName = new TextView(this);
+            fileName.setText("🖼️ " + file.getName());
+            fileName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            fileName.setTextColor(Color.parseColor("#333333"));
+            fileName.setPadding(0, 0, 0, dp2px(12));
+            rootLayout.addView(fileName);
+
+            ImageView imageView = new ImageView(this);
+            imageView.setImageBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
+            imageView.setAdjustViewBounds(true);
+            imageView.setMaxWidth(dp2px(450));
+            imageView.setMaxHeight(dp2px(600));
+            imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            imageView.setBackgroundColor(Color.parseColor("#F5F5F5"));
+            imageView.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
+
+            ScrollView scrollView = new ScrollView(this);
+            scrollView.addView(imageView);
+            rootLayout.addView(scrollView);
+
+            builder.setView(rootLayout)
+                    .setPositiveButton("打开", (dialog, which) -> openFile(file))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (Exception e) {
+            Toast.makeText(this, "无法预览图片", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void previewDocument(File file) {
+        try {
+            if (file.length() > 1024 * 1024) {
+                Toast.makeText(this, "文档过大，建议使用专业应用打开", Toast.LENGTH_SHORT).show();
+                openFile(file);
+                return;
+            }
+
+            StringBuilder content = new StringBuilder();
+            BufferedReader reader = new BufferedReader(new FileReader(file));
+            String line;
+            int lineCount = 0;
+            while ((line = reader.readLine()) != null && lineCount < 300) {
+                content.append(line).append("\n");
+                lineCount++;
+            }
+            reader.close();
+
+            if (content.length() == 0) {
+                Toast.makeText(this, "文档内容为空", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            TextView textView = new TextView(this);
+            textView.setText(content.toString());
+            textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            textView.setTextColor(Color.BLACK);
+            textView.setPadding(dp2px(16), dp2px(16), dp2px(16), dp2px(16));
+            textView.setTypeface(android.graphics.Typeface.MONOSPACE);
+
+            ScrollView scrollView = new ScrollView(this);
+            scrollView.addView(textView);
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog);
+            builder.setTitle(file.getName())
+                    .setView(scrollView)
+                    .setPositiveButton("打开", (dialog, which) -> openFile(file))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (Exception e) {
+            Toast.makeText(this, "无法预览文档: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void playAudio(File audioFile) {
+        if (audioDialog != null && audioDialog.isShowing()) {
+            closeAudioPlayer();
+        }
+
+        isPrepared = false;
+        isUserSeeking = false;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog);
+
+        LinearLayout rootLayout = new LinearLayout(this);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        rootLayout.setBackgroundColor(Color.WHITE);
+        rootLayout.setPadding(dp2px(20), dp2px(20), dp2px(20), dp2px(16));
+        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(dp2px(400), LinearLayout.LayoutParams.WRAP_CONTENT);
+        rootLayout.setLayoutParams(layoutParams);
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setPadding(0, 0, 0, dp2px(12));
+
+        TextView iconView = new TextView(this);
+        iconView.setText("🎵");
+        iconView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        iconView.setPadding(0, 0, dp2px(12), 0);
+
+        tvAudioTitle = new TextView(this);
+        tvAudioTitle.setText(audioFile.getName());
+        tvAudioTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        tvAudioTitle.setTextColor(Color.parseColor("#333333"));
+        tvAudioTitle.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        titleRow.addView(iconView);
+        titleRow.addView(tvAudioTitle);
+
+        LinearLayout progressRow = new LinearLayout(this);
+        progressRow.setOrientation(LinearLayout.HORIZONTAL);
+        progressRow.setGravity(Gravity.CENTER_VERTICAL);
+        progressRow.setPadding(0, dp2px(4), 0, dp2px(8));
+
+        tvCurrentTime = new TextView(this);
+        tvCurrentTime.setText("00:00");
+        tvCurrentTime.setTextSize(12);
+        tvCurrentTime.setTextColor(Color.parseColor("#999999"));
+        tvCurrentTime.setPadding(0, 0, dp2px(8), 0);
+
+        seekBar = new SeekBar(this);
+        LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        seekBar.setLayoutParams(seekParams);
+        seekBar.setMax(1000);
+
+        tvTotalTime = new TextView(this);
+        tvTotalTime.setText("00:00");
+        tvTotalTime.setTextSize(12);
+        tvTotalTime.setTextColor(Color.parseColor("#999999"));
+        tvTotalTime.setPadding(dp2px(8), 0, 0, 0);
+
+        progressRow.addView(tvCurrentTime);
+        progressRow.addView(seekBar);
+        progressRow.addView(tvTotalTime);
+
+        LinearLayout buttonRow = new LinearLayout(this);
+        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+        buttonRow.setGravity(Gravity.CENTER);
+        buttonRow.setPadding(0, dp2px(4), 0, 0);
+
+        btnPlayPause = new Button(this);
+        btnPlayPause.setText("▶");
+        btnPlayPause.setTextSize(26);
+        btnPlayPause.setTextColor(Color.parseColor("#1976D2"));
+        btnPlayPause.setBackground(null);
+        btnPlayPause.setPadding(dp2px(20), dp2px(4), dp2px(20), dp2px(4));
+        btnPlayPause.setOnClickListener(v -> togglePlayPause());
+
+        View spacer1 = new View(this);
+        spacer1.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1.0f));
+
+        btnClose = new Button(this);
+        btnClose.setText("✕ 关闭");
+        btnClose.setTextSize(14);
+        btnClose.setTextColor(Color.parseColor("#999999"));
+        btnClose.setBackground(null);
+        btnClose.setPadding(dp2px(12), dp2px(4), dp2px(12), dp2px(4));
+        btnClose.setOnClickListener(v -> closeAudioPlayer());
+
+        buttonRow.addView(btnPlayPause);
+        buttonRow.addView(spacer1);
+        buttonRow.addView(btnClose);
+
+        rootLayout.addView(titleRow);
+        rootLayout.addView(progressRow);
+        rootLayout.addView(buttonRow);
+
+        builder.setView(rootLayout);
+        builder.setCancelable(false);
+        audioDialog = builder.create();
+
+        audioDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_PANEL);
+        audioDialog.show();
+
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null && isPrepared) {
+                    int duration = mediaPlayer.getDuration();
+                    if (duration > 0) {
+                        int newPosition = (int) ((float) progress / 1000 * duration);
+                        tvCurrentTime.setText(formatTime(newPosition));
+                    }
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                isUserSeeking = true;
+                if (mediaPlayer != null && isPlaying) {
+                    mediaPlayer.pause();
+                }
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                isUserSeeking = false;
+                if (mediaPlayer != null && isPrepared) {
+                    int duration = mediaPlayer.getDuration();
+                    if (duration > 0) {
+                        int newPosition = (int) ((float) seekBar.getProgress() / 1000 * duration);
+                        mediaPlayer.seekTo(newPosition);
+                        tvCurrentTime.setText(formatTime(newPosition));
+                    }
+                    if (isPlaying) {
+                        mediaPlayer.start();
+                    }
+                }
+            }
+        });
+
+        try {
+            if (mediaPlayer != null) {
+                mediaPlayer.release();
+                mediaPlayer = null;
+            }
+
+            mediaPlayer = new MediaPlayer();
+            mediaPlayer.setDataSource(audioFile.getAbsolutePath());
+            mediaPlayer.prepareAsync();
+
+            mediaPlayer.setOnPreparedListener(mp -> {
+                isPrepared = true;
+                mp.start();
+                isPlaying = true;
+                btnPlayPause.setText("⏸");
+                seekBar.setMax(1000);
+                tvTotalTime.setText(formatTime(mp.getDuration()));
+                updateSeekBar();
+            });
+
+            mediaPlayer.setOnCompletionListener(mp -> {
+                isPlaying = false;
+                btnPlayPause.setText("▶");
+                seekBar.setProgress(0);
+                tvCurrentTime.setText("00:00");
+                handler.removeCallbacks(updateRunnable);
+            });
+
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Toast.makeText(MainActivity.this, "播放出错", Toast.LENGTH_SHORT).show();
+                return true;
+            });
+
+        } catch (IOException e) {
+            Toast.makeText(this, "无法播放音频", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void togglePlayPause() {
+        if (mediaPlayer == null || !isPrepared) {
+            Toast.makeText(this, "音频尚未准备好", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (isPlaying) {
+            mediaPlayer.pause();
+            isPlaying = false;
+            btnPlayPause.setText("▶");
+            handler.removeCallbacks(updateRunnable);
+        } else {
+            mediaPlayer.start();
+            isPlaying = true;
+            btnPlayPause.setText("⏸");
+            updateSeekBar();
+        }
+    }
+
+    private void closeAudioPlayer() {
+        if (mediaPlayer != null) {
+            mediaPlayer.release();
+            mediaPlayer = null;
+        }
+        isPlaying = false;
+        isPrepared = false;
+        handler.removeCallbacks(updateRunnable);
+        if (audioDialog != null && audioDialog.isShowing()) {
+            audioDialog.dismiss();
+            audioDialog = null;
+        }
+    }
+
+    private void updateSeekBar() {
+        if (mediaPlayer == null || !isPlaying) return;
+        if (!isUserSeeking) {
+            handler.postDelayed(updateRunnable, 100);
+        }
+    }
+
+    private Runnable updateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mediaPlayer != null && isPlaying && isPrepared && !isUserSeeking) {
+                try {
+                    int current = mediaPlayer.getCurrentPosition();
+                    int duration = mediaPlayer.getDuration();
+                    if (duration > 0) {
+                        int progress = (int) ((float) current / duration * 1000);
+                        seekBar.setProgress(progress);
+                        tvCurrentTime.setText(formatTime(current));
+                        updateSeekBar();
+                    }
+                } catch (IllegalStateException e) {
+                }
+            }
+        }
+    };
+
+    private String formatTime(int millis) {
+        int seconds = millis / 1000;
+        int minutes = seconds / 60;
+        seconds = seconds % 60;
+        return String.format("%02d:%02d", minutes, seconds);
+    }
+
+    private void openFile(File file) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            Uri uri = Uri.fromFile(file);
+            intent.setData(uri);
+            String mimeType = getContentResolver().getType(uri);
+            if (mimeType != null) {
+                intent.setType(mimeType);
+            }
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "打开文件"));
+        } catch (Exception e) {
+            Toast.makeText(this, "无法打开文件", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String getFileExtension(String name) {
+        int lastDot = name.lastIndexOf('.');
+        if (lastDot > 0) {
+            return name.substring(lastDot + 1).toLowerCase();
+        }
+        return "";
+    }
+
+    private boolean isImageFile(String ext) {
+        return ext.equals("jpg") || ext.equals("jpeg") || ext.equals("png") ||
+                ext.equals("gif") || ext.equals("bmp") || ext.equals("webp") ||
+                ext.equals("heic") || ext.equals("heif");
+    }
+
+    private boolean isAudioFile(String ext) {
+        return ext.equals("mp3") || ext.equals("wav") || ext.equals("flac") ||
+                ext.equals("aac") || ext.equals("m4a") || ext.equals("wma") ||
+                ext.equals("ogg") || ext.equals("opus") || ext.equals("amr");
+    }
+
+    private boolean isDocumentFile(String ext) {
+        return ext.equals("txt") || ext.equals("log") || ext.equals("xml") ||
+                ext.equals("json") || ext.equals("html") || ext.equals("css") ||
+                ext.equals("js") || ext.equals("md") || ext.equals("cfg") ||
+                ext.equals("conf") || ext.equals("sh") || ext.equals("bat") ||
+                ext.equals("properties") || ext.equals("java") || ext.equals("c") ||
+                ext.equals("cpp") || ext.equals("h") || ext.equals("py") ||
+                ext.equals("php") || ext.equals("rb") || ext.equals("go") ||
+                ext.equals("rs") || ext.equals("swift") || ext.equals("kt");
+    }
+
+    private boolean isTextFile(String ext) {
+        return isDocumentFile(ext);
+    }
+
     private void handleInput(String input) {
         if (input.isEmpty()) {
             Toast.makeText(this, "请输入内容", Toast.LENGTH_SHORT).show();
@@ -418,7 +861,7 @@ public class MainActivity extends Activity {
             if (cleanPath.startsWith("file://")) cleanPath = cleanPath.substring(7);
             File file = new File(cleanPath);
             if (file.exists() && file.isFile()) {
-                openFile(cleanPath);
+                previewFile(file);
             } else {
                 showFileList(input);
             }
@@ -455,7 +898,7 @@ public class MainActivity extends Activity {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(intent, "打开文件"));
         } catch (Exception e) {
-            Toast.makeText(this, "无法打开此内容: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "无法打开此内容", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -475,31 +918,19 @@ public class MainActivity extends Activity {
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception e) {
-            Toast.makeText(this, "无法打开网址: " + url, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "无法打开网址", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void openFile(String path) {
-        try {
-            File file = new File(path);
-            if (!file.exists()) {
-                Toast.makeText(this, "文件不存在: " + path, Toast.LENGTH_SHORT).show();
-                return;
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "存储权限已授予", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "需要存储权限才能浏览文件", Toast.LENGTH_SHORT).show();
             }
-            if (file.isDirectory()) {
-                return;
-            }
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            Uri uri = Uri.fromFile(file);
-            intent.setData(uri);
-            String mimeType = getContentResolver().getType(uri);
-            if (mimeType != null) {
-                intent.setType(mimeType);
-            }
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(intent, "打开文件"));
-        } catch (Exception e) {
-            Toast.makeText(this, "无法打开文件: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 }
