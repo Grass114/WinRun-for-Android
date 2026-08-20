@@ -1,2 +1,2 @@
-# WinRun-for-Android
+# WinRun for Android
 ⚡ Android 版“运行” — 像 Windows 一样快速启动应用、打开文件、访问网址。 支持中文应用名、文件浏览、实时目录列表，轻量无广告。
