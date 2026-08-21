@@ -17,7 +17,7 @@
 ## 编译
 需要 Android SDK (Build Tools 34.0.0, Platform android-34)
 
-### Windows 编译
+## Windows 编译
 javac -encoding UTF-8 -d . -cp %ANDROID_HOME%/platforms/android-34/android.jar src/com/bluecat114/run/MainActivity.java
 jar -cf classes.jar com/bluecat114/run/*.class
 %ANDROID_HOME%/build-tools/34.0.0/d8 --lib %ANDROID_HOME%/platforms/android-34/android.jar --output . classes.jar
